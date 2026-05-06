@@ -1,7 +1,0 @@
-WICHTIG: Bitte lade die folgenden Dateien direkt in diesen (public) Ordner hoch:
-
-1. ErgoFocus-Icon.png (Logo & Favicon)
-2. ergofocus-extension-popup.png (Hero-Bereich Bild)
-3. ergofocus-extension-pomodoro-ubungen.png (Übungs-Showcase Bild)
-
-Hinweis: Ich habe die Dateinamen im Code ohne Umlaute (ubungen statt übungen) verwendet, da dies im Web sicherer ist. Bitte benenne deine Datei entsprechend um.

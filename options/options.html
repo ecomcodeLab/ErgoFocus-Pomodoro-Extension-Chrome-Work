@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>ErgoFocus – Einstellungen</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="options-container">
+    <header class="options-header">
+      <div class="logo">🍅</div>
+      <h1>ErgoFocus</h1>
+      <p id="headerSubtitle">Einstellungen</p>
+    </header>
+
+    <!-- Language -->
+    <section class="options-section">
+      <h2 id="langTitle">🌐 Sprache</h2>
+      <div class="option-row">
+        <label class="option-label" id="langLabel">Sprache</label>
+        <div class="lang-toggle">
+          <button class="lang-btn active" id="langDe" data-lang="de">DE</button>
+          <button class="lang-btn" id="langEn" data-lang="en">EN</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Timer -->
+    <section class="options-section">
+      <h2 id="timerTitle">⏱️ Timer</h2>
+      <div class="option-row">
+        <div class="label-group">
+          <label class="option-label" for="focusDuration" id="focusLabel">Fokuszeit</label>
+          <span class="hint" id="focusHint">(gesund: 25–50 Min)</span>
+        </div>
+        <input type="number" id="focusDuration" min="1" max="90" value="25" />
+      </div>
+      <div class="option-row">
+        <div class="label-group">
+          <label class="option-label" for="shortBreakDuration" id="shortBreakLabel">Kurze Pause</label>
+          <span class="hint" id="shortBreakHint">(gesund: 5–10 Min)</span>
+        </div>
+        <input type="number" id="shortBreakDuration" min="1" max="30" value="5" />
+      </div>
+      <div class="option-row">
+        <div class="label-group">
+          <label class="option-label" for="longBreakDuration" id="longBreakLabel">Lange Pause</label>
+          <span class="hint" id="longBreakHint">(gesund: 15–30 Min)</span>
+        </div>
+        <input type="number" id="longBreakDuration" min="1" max="60" value="15" />
+      </div>
+      <div class="option-row">
+        <div class="label-group">
+          <label class="option-label" for="sessionsUntilLongBreak" id="sessionsLabel">Einheiten bis lange Pause</label>
+          <span class="hint" id="sessionsHint">(empfohlen: 4 Einheiten)</span>
+        </div>
+        <input type="number" id="sessionsUntilLongBreak" min="1" max="10" value="4" />
+      </div>
+    </section>
+
+    <!-- Notifications & Sound -->
+    <section class="options-section">
+      <h2 id="notifTitle">🔔 Benachrichtigungen</h2>
+      <div class="option-row">
+        <label class="option-label" for="soundEnabled" id="soundLabel">Ton bei Timer-Ablauf</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="soundEnabled" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="option-row">
+        <label class="option-label" for="notificationsEnabled" id="notifLabel">Desktop-Benachrichtigungen</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notificationsEnabled" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Categories -->
+    <section class="options-section">
+      <h2 id="catTitle">🏷️ Übungskategorien</h2>
+      <p class="section-desc" id="catDesc">Wähle, welche Kategorien in der Pause angezeigt werden.</p>
+      <div class="category-grid" id="categoryGrid">
+        <div class="category-card" data-cat-id="eyes">
+          <div class="cat-icon">👁️</div>
+          <div class="cat-name" id="catEyesLabel">Augen</div>
+          <label class="toggle-switch small">
+            <input type="checkbox" id="catEyesToggle" data-cat="eyes" checked />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="category-card" data-cat-id="movement">
+          <div class="cat-icon">🚶</div>
+          <div class="cat-name" id="catMovementLabel">Bewegung</div>
+          <label class="toggle-switch small">
+            <input type="checkbox" id="catMovementToggle" data-cat="movement" checked />
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="category-card" data-cat-id="mental">
+          <div class="cat-icon">🧠</div>
+          <div class="cat-name" id="catMentalLabel">Mental</div>
+          <label class="toggle-switch small">
+            <input type="checkbox" id="catMentalToggle" data-cat="mental" checked />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Save -->
+    <div class="save-section">
+      <button id="saveBtn" class="save-btn">
+        <span id="saveBtnText">Einstellungen speichern</span>
+      </button>
+      <p id="saveStatus" class="save-status"></p>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
