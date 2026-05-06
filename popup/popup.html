@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>ErgoFocus</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="brand">ErgoFocus</span>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙️</button>
+    </div>
+
+    <div class="mode-tabs">
+      <button class="mode-btn active" data-mode="focus"      id="btn-focus">Fokus</button>
+      <button class="mode-btn"        data-mode="shortBreak" id="btn-shortBreak">Kurze Pause</button>
+      <button class="mode-btn"        data-mode="longBreak"  id="btn-longBreak">Lange Pause</button>
+    </div>
+
+    <div class="timer-wrapper">
+      <svg class="progress-ring" viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="progress-bg" cx="60" cy="60" r="54"/>
+        <circle class="progress-bar" id="progressCircle" cx="60" cy="60" r="54"
+          stroke-dasharray="339.292"
+          stroke-dashoffset="0"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+      </svg>
+      <div class="timer-inner">
+        <div id="timer" class="timer-display">20:00</div>
+        <div id="modeLabel" class="mode-label">Fokus</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="resetBtn" class="ctrl-btn reset-btn" aria-label="Reset">↺</button>
+      <button id="playBtn"  class="ctrl-btn play-btn"  aria-label="Play/Pause">▶</button>
+    </div>
+
+    <div id="sessionCount" class="session-count">🍅 0 / 4 bis lange Pause</div>
+
+    <div class="autoloop-row">
+      <label class="toggle-label" for="autoLoopToggle">
+        <span id="autoLoopLabel">Auto-Loop</span>
+        <div class="toggle-switch">
+          <input type="checkbox" id="autoLoopToggle" role="switch">
+          <span class="toggle-slider"></span>
+        </div>
+      </label>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

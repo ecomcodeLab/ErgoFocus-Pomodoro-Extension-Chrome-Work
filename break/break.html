@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>ErgoFocus – Pause</title>
+  <link rel="stylesheet" href="break.css" />
+</head>
+<body class="short-break">
+  <div class="break-container">
+    <div class="break-header">
+      <h1 id="breakHeadline">Gut gemacht! Zeit für eine Pause.</h1>
+      <p id="breakSubtitle">Gönn deinem Körper etwas Gutes.</p>
+    </div>
+
+    <div class="timer-section">
+      <div class="break-timer-display" id="breakTimer">05:00</div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="breakProgressBar"></div>
+      </div>
+    </div>
+
+    <div class="exercises-section">
+      <div id="exerciseCards" class="exercise-cards"></div>
+    </div>
+
+    <div class="break-footer">
+      <button id="skipBtn" class="skip-btn">Pause überspringen</button>
+    </div>
+  </div>
+
+  <script src="../data/exercises.js"></script>
+  <script src="break.js"></script>
+</body>
+</html>
