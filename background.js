@@ -36,7 +36,6 @@ async function loadState() {
           settings: savedSettings
         };
         if (state.status === 'running') {
-          // If SW was killed and timer was running, set to paused to avoid desync
           state.status = 'paused';
         }
       } else {
@@ -70,14 +69,9 @@ function getModeDuration(mode, settings) {
   return DEFAULT_SETTINGS.focusDuration * 60;
 }
 
-function playChime() {
-  if (!state || !state.settings.soundEnabled) return;
-  // Sound is played in popup/break pages via Web Audio API
-}
-
 function sendNotification(title, message) {
   if (!state || !state.settings.notificationsEnabled) return;
-  chrome.notifications.create(String(Date.now()), { // Unique ID for each notification
+  chrome.notifications.create(String(Date.now()), {
     type: 'basic',
     iconUrl: '../assets/icon128.png',
     title,
@@ -85,7 +79,12 @@ function sendNotification(title, message) {
   });
 }
 
-function setBadge(remaining, mode) {
+function setBadge(remaining, mode, status) {
+  // Only show badge text when timer is running or paused (active)
+  if (status === 'stopped') {
+    chrome.action.setBadgeText({ text: '' });
+    return;
+  }
   const minutes = Math.ceil(remaining / 60);
   const text = minutes > 0 ? String(minutes) : '0';
   const color = mode === 'focus' ? '#f97316' : mode === 'longBreak' ? '#3b82f6' : '#22c55e';
@@ -98,7 +97,6 @@ async function openBreakPage(mode) {
   if (tabs.length === 0) {
     await chrome.tabs.create({ url: chrome.runtime.getURL('break/break.html'), active: true });
   } else {
-    // If break page already open, just activate it
     await chrome.tabs.update(tabs[0].id, { active: true });
   }
 }
@@ -109,7 +107,6 @@ async function timerFinished() {
   const prevMode = state.mode;
 
   if (prevMode === 'focus') {
-    // Increment session count ONLY when a focus session finishes
     state.sessionCount = (state.sessionCount || 0) + 1;
 
     const sessionsUntilLong = state.settings.sessionsUntilLongBreak || DEFAULT_SETTINGS.sessionsUntilLongBreak;
@@ -117,7 +114,7 @@ async function timerFinished() {
 
     state.mode = nextMode;
     state.remaining = getModeDuration(nextMode, state.settings);
-    state.status = 'running'; // Break starts running automatically
+    state.status = 'running';
 
     const lang = state.settings.language || 'de';
     const title = lang === 'en' ? 'Break Time!' : 'Pausenzeit!';
@@ -128,10 +125,10 @@ async function timerFinished() {
     sendNotification(title, msg);
     await saveState();
     await scheduleAlarm();
+    setBadge(state.remaining, state.mode, state.status);
     await openBreakPage(nextMode);
 
-  } else { // Break finished (shortBreak or longBreak)
-    // Break finished → go back to focus
+  } else {
     state.mode = 'focus';
     state.remaining = getModeDuration('focus', state.settings);
 
@@ -144,9 +141,11 @@ async function timerFinished() {
       );
       await saveState();
       await scheduleAlarm();
+      setBadge(state.remaining, state.mode, state.status);
     } else {
       state.status = 'stopped';
       await saveState();
+      setBadge(state.remaining, state.mode, state.status);
     }
   }
 }
@@ -168,7 +167,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     return;
   }
   state.remaining = Math.max(0, state.remaining - 1);
-  setBadge(state.remaining, state.mode);
+  setBadge(state.remaining, state.mode, state.status);
   await saveState();
 
   if (state.remaining <= 0) {
@@ -194,6 +193,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           }
           await saveState();
           await scheduleAlarm();
+          setBadge(state.remaining, state.mode, state.status);
         }
         sendResponse({ ...state, total: getModeDuration(state.mode, state.settings) });
         break;
@@ -203,6 +203,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           state.status = 'paused';
           await chrome.alarms.clear('pomodoroTick');
           await saveState();
+          setBadge(state.remaining, state.mode, state.status);
         }
         sendResponse({ ...state, total: getModeDuration(state.mode, state.settings) });
         break;
@@ -210,10 +211,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case 'RESET':
         await chrome.alarms.clear('pomodoroTick');
         state.status = 'stopped';
-        state.sessionCount = 0; // Reset session count on full reset
+        state.sessionCount = 0;
         state.remaining = getModeDuration(state.mode, state.settings);
         await saveState();
-        setBadge(state.remaining, state.mode);
+        setBadge(state.remaining, state.mode, state.status);
         sendResponse({ ...state, total: getModeDuration(state.mode, state.settings) });
         break;
 
@@ -225,7 +226,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           state.status = 'stopped';
           state.remaining = getModeDuration(newMode, state.settings);
           await saveState();
-          setBadge(state.remaining, newMode);
+          setBadge(state.remaining, newMode, state.status);
         }
         sendResponse({ ...state, total: getModeDuration(state.mode, state.settings) });
         break;
@@ -241,11 +242,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const newSettings = { ...DEFAULT_SETTINGS, ...msg.settings };
         state.settings = newSettings;
         await saveSettings(newSettings);
-        // Update remaining if timer is stopped or mode changed
-        if (state.status === 'stopped' || state.mode !== msg.settings.mode) { // Added mode check
+        if (state.status === 'stopped') {
           state.remaining = getModeDuration(state.mode, newSettings);
         }
         await saveState();
+        setBadge(state.remaining, state.mode, state.status);
         sendResponse({ ...state, total: getModeDuration(state.mode, state.settings) });
         break;
       }
@@ -253,10 +254,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       case 'BREAK_PAGE_DONE':
       case 'BREAK_PAGE_SKIP': {
         await chrome.alarms.clear('pomodoroTick');
-        // If break was skipped/done, and autoLoop is off, set status to stopped
-        if (!state.autoLoop) {
-          state.status = 'stopped';
-        }
         state.mode = 'focus';
         state.remaining = getModeDuration('focus', state.settings);
 
@@ -269,9 +266,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           );
           await saveState();
           await scheduleAlarm();
+          setBadge(state.remaining, state.mode, state.status);
         } else {
-          state.status = 'stopped'; // Ensure it's stopped if autoLoop is off
+          state.status = 'stopped';
           await saveState();
+          setBadge(state.remaining, state.mode, state.status);
         }
         sendResponse({ ...state, total: getModeDuration(state.mode, state.settings) });
         break;
@@ -286,15 +285,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadState();
-  if (state) setBadge(state.remaining, state.mode);
+  if (state) setBadge(state.remaining, state.mode, state.status);
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await loadState();
-  if (state) setBadge(state.remaining, state.mode);
+  if (state) setBadge(state.remaining, state.mode, state.status);
 });
 
 // Init on service worker start
 loadState().then(() => {
-  if (state) setBadge(state.remaining, state.mode);
+  if (state) setBadge(state.remaining, state.mode, state.status);
 });
