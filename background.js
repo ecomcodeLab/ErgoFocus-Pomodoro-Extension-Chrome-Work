@@ -1,335 +1,347 @@
 'use strict';
 
-const DEFAULTS = {
-  focusDuration:          20,
-  shortBreakDuration:      5,
-  longBreakDuration:       15,
-  sessionsUntilLongBreak:  4,
-  soundEnabled:            true,
-  notificationsEnabled:    true,
-  language:               'de',
+// ── Constants ─────────────────────────────────────────────────
+const DEFAULT_SETTINGS = {
+  focusDuration: 20,
+  shortBreakDuration: 5,
+  longBreakDuration: 15,
+  sessionsUntilLongBreak: 4,
+  soundEnabled: true,
+  notificationsEnabled: true,
+  language: 'de',
+  enabledCategories: ['eyes', 'mental', 'movement']
 };
 
+const STATE_KEY = 'ergofocus_state';
+
+// ── In-memory state ───────────────────────────────────────────
 let state = {
-  status:       'stopped',
-  mode:         'focus',
-  remaining:    DEFAULTS.focusDuration * 60,
+  status: 'stopped',
+  mode: 'focus',
+  remaining: 0,
   sessionCount: 0,
-  autoLoop:     false,
-  settings:     { ...DEFAULTS },
+  autoLoop: false,
+  settings: { ...DEFAULT_SETTINGS }
 };
 
-const TICK_ALARM = 'ERGOFOCUS_TICK';
-let lastTickTime = null;
-
-// ── Storage ────────────────────────────────────────────────────────────────
+// ── Persist / restore state ───────────────────────────────────
 function saveState() {
-  return chrome.storage.local.set({ timerState: state });
+  chrome.storage.local.set({ [STATE_KEY]: {
+    status: state.status,
+    mode: state.mode,
+    remaining: state.remaining,
+    sessionCount: state.sessionCount,
+    autoLoop: state.autoLoop
+  }});
 }
 
-async function loadState() {
-  const data = await chrome.storage.local.get(['timerState', 'settings', 'enabledCategories', 'autoLoop']);
+function restoreState(cb) {
+  chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+    state.settings = { ...DEFAULT_SETTINGS, ...settings };
 
-  if (data.settings) {
-    state.settings = { ...DEFAULTS, ...data.settings };
-  }
-  if (data.enabledCategories) {
-    state.settings.enabledCategories = data.enabledCategories;
-  }
-
-  if (data.timerState) {
-    const t = data.timerState;
-    state.status       = t.status       || 'stopped';
-    state.mode         = t.mode         || 'focus';
-    state.sessionCount = t.sessionCount || 0;
-    state.autoLoop     = typeof t.autoLoop === 'boolean' ? t.autoLoop : false;
-
-    if (t.status === 'running' || t.status === 'paused') {
-      state.remaining = typeof t.remaining === 'number' ? t.remaining : getDuration(state.mode);
-    } else {
-      state.remaining = getDuration(state.mode);
-    }
-
-    if (t.settings) {
-      state.settings = { ...DEFAULTS, ...t.settings };
-      if (data.settings) state.settings = { ...state.settings, ...data.settings };
-      if (data.enabledCategories) state.settings.enabledCategories = data.enabledCategories;
-    }
-  } else {
-    state.remaining = getDuration('focus');
-  }
-
-  if (typeof data.autoLoop === 'boolean') {
-    state.autoLoop = data.autoLoop;
-  }
+    chrome.storage.local.get([STATE_KEY], (local) => {
+      const saved = local[STATE_KEY];
+      if (saved) {
+        state.status       = saved.status       || 'stopped';
+        state.mode         = saved.mode         || 'focus';
+        state.remaining    = saved.remaining    || 0;
+        state.sessionCount = saved.sessionCount || 0;
+        state.autoLoop     = saved.autoLoop     || false;
+      } else {
+        state.remaining = state.settings.focusDuration * 60;
+      }
+      if (typeof cb === 'function') cb();
+    });
+  });
 }
 
-// ── Duration ───────────────────────────────────────────────────────────────
-function getDuration(mode) {
-  const s = state.settings;
-  if (mode === 'focus')      return Math.max(1, (s.focusDuration      || DEFAULTS.focusDuration))      * 60;
-  if (mode === 'shortBreak') return Math.max(1, (s.shortBreakDuration  || DEFAULTS.shortBreakDuration))  * 60;
-  if (mode === 'longBreak')  return Math.max(1, (s.longBreakDuration   || DEFAULTS.longBreakDuration))   * 60;
-  return Math.max(1, (s.focusDuration || DEFAULTS.focusDuration)) * 60;
-}
-
-// ── Badge ──────────────────────────────────────────────────────────────────
+// ── Badge ─────────────────────────────────────────────────────
 function updateBadge() {
   if (state.status === 'stopped') {
     chrome.action.setBadgeText({ text: '' });
     return;
   }
-  const totalSecs = state.remaining;
-  let text;
-  if (totalSecs >= 60) {
-    text = String(Math.ceil(totalSecs / 60)) + 'm';
+
+  const remaining = state.remaining;
+  let badgeText;
+
+  if (remaining <= 0) {
+    badgeText = '0';
+  } else if (remaining < 60) {
+    badgeText = String(remaining);
   } else {
-    text = String(totalSecs) + 's';
+    const mins = Math.ceil(remaining / 60);
+    badgeText = String(mins);
   }
-  const color = state.mode === 'focus' ? '#f97316' : state.mode === 'longBreak' ? '#3b82f6' : '#22c55e';
-  chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color });
+
+  chrome.action.setBadgeText({ text: badgeText });
+  chrome.action.setBadgeBackgroundColor({
+    color: state.mode === 'focus' ? '#f97316' : '#22c55e'
+  });
 }
 
-// ── Sound ──────────────────────────────────────────────────────────────────
-function triggerSound() {
-  if (state.settings.soundEnabled) {
-    chrome.storage.local.set({ playSoundFlag: Date.now() });
-  }
+// ── Sound ─────────────────────────────────────────────────────
+function notifySound() {
+  try {
+    chrome.runtime.sendMessage({ type: 'PLAY_SOUND' });
+  } catch (_) {}
 }
 
-// ── Notification ───────────────────────────────────────────────────────────
-function notify(title, message) {
+// ── Notification ──────────────────────────────────────────────
+function showNotification(title, message) {
   if (!state.settings.notificationsEnabled) return;
-  chrome.notifications.create('ef_' + Date.now(), {
-    type:    'basic',
-    iconUrl: 'assets/icon128.png',
+  chrome.notifications.create(`ergofocus_${Date.now()}`, {
+    type: 'basic',
+    iconUrl: '../assets/icon128.png',
     title,
-    message,
+    message
   });
 }
 
-// ── Break tab ──────────────────────────────────────────────────────────────
-function openBreakTab() {
-  const url = chrome.runtime.getURL('break/break.html');
-  chrome.tabs.query({ url }, (tabs) => {
-    if (tabs && tabs.length > 0) {
-      chrome.tabs.update(tabs[0].id, { active: true });
-    } else {
-      chrome.tabs.create({ url });
-    }
-  });
+// ── Timer tick ────────────────────────────────────────────────
+function tick() {
+  if (state.status !== 'running') return;
+  if (state.remaining <= 0) {
+    timerFinished();
+    return;
+  }
+  state.remaining -= 1;
+  updateBadge();
+  saveState();
 }
 
-function closeBreakTab() {
-  const url = chrome.runtime.getURL('break/break.html');
-  chrome.tabs.query({ url }, (tabs) => {
-    tabs.forEach(t => chrome.tabs.remove(t.id));
-  });
-}
-
-// ── Alarm ──────────────────────────────────────────────────────────────────
-function startAlarm() {
-  lastTickTime = Date.now();
-  chrome.alarms.create(TICK_ALARM, { periodInMinutes: 1 / 60 });
-}
-
-function stopAlarm() {
-  chrome.alarms.clear(TICK_ALARM);
-  lastTickTime = null;
-}
-
-// ── Timer finished ─────────────────────────────────────────────────────────
-async function timerFinished() {
-  stopAlarm();
-  triggerSound();
+// ── Timer finished ────────────────────────────────────────────
+function timerFinished() {
+  chrome.alarms.clear('tick');
+  state.status = 'stopped';
+  notifySound();
 
   const lang = state.settings.language || 'de';
 
   if (state.mode === 'focus') {
     state.sessionCount += 1;
+    const sessUntil = state.settings.sessionsUntilLongBreak || 4;
+    const isLongBreak = (state.sessionCount % sessUntil === 0);
 
-    const needed   = Math.max(1, state.settings.sessionsUntilLongBreak || DEFAULTS.sessionsUntilLongBreak);
-    const isLong   = (state.sessionCount % needed) === 0;
-    const nextMode = isLong ? 'longBreak' : 'shortBreak';
+    const nextMode = isLongBreak ? 'longBreak' : 'shortBreak';
+    const breakMins = isLongBreak
+      ? state.settings.longBreakDuration
+      : state.settings.shortBreakDuration;
 
-    state.mode      = nextMode;
-    state.status    = 'running';
-    state.remaining = getDuration(nextMode);
+    state.mode = nextMode;
+    state.remaining = breakMins * 60;
 
-    notify(
-      lang === 'en' ? 'Focus done! Break time 🌿' : 'Fokus vorbei! Pause 🌿',
-      lang === 'en'
-        ? (isLong ? 'Long' : 'Short') + ' break started.'
-        : (isLong ? 'Lange' : 'Kurze') + ' Pause gestartet.'
-    );
+    const title   = lang === 'en' ? 'Focus done!' : 'Fokus beendet!';
+    const message = lang === 'en'
+      ? `${breakMins} min ${isLongBreak ? 'long ' : ''}break starting.`
+      : `${breakMins} Min. ${isLongBreak ? 'lange ' : ''}Pause beginnt.`;
+    showNotification(title, message);
 
-    await saveState();
-    startAlarm();
-    updateBadge();
-    openBreakTab();
-
-  } else {
-    closeBreakTab();
-    notify(
-      lang === 'en' ? 'Break over! Back to work 💪' : 'Pause vorbei! Weiter 💪',
-      lang === 'en' ? 'Focus session starting.' : 'Fokus-Session startet.'
-    );
+    saveState();
+    openBreakPage();
 
     if (state.autoLoop) {
-      state.mode      = 'focus';
-      state.status    = 'running';
-      state.remaining = getDuration('focus');
-      await saveState();
-      startAlarm();
+      state.status = 'running';
+      state.remaining = breakMins * 60;
+      saveState();
+      chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
       updateBadge();
-    } else {
-      state.mode      = 'focus';
-      state.status    = 'stopped';
-      state.remaining = getDuration('focus');
-      await saveState();
+    }
+
+  } else {
+    const focusMins = state.settings.focusDuration;
+    state.mode = 'focus';
+    state.remaining = focusMins * 60;
+
+    const title   = lang === 'en' ? 'Break over!' : 'Pause beendet!';
+    const message = lang === 'en'
+      ? `${focusMins} min focus session starting.`
+      : `${focusMins} Min. Fokus beginnt.`;
+    showNotification(title, message);
+
+    saveState();
+    closeBreakPage();
+
+    if (state.autoLoop) {
+      state.status = 'running';
+      saveState();
+      chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
       updateBadge();
     }
   }
 }
 
-// ── Alarm listener ─────────────────────────────────────────────────────────
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== TICK_ALARM) return;
-  if (state.status !== 'running') return;
+// ── Break page management ─────────────────────────────────────
+let breakTabId = null;
 
-  const now     = Date.now();
-  const elapsed = lastTickTime ? Math.round((now - lastTickTime) / 1000) : 1;
-  lastTickTime  = now;
-
-  state.remaining = Math.max(0, state.remaining - elapsed);
-  updateBadge();
-  await saveState();
-
-  if (state.remaining <= 0) {
-    await timerFinished();
+function openBreakPage() {
+  const url = chrome.runtime.getURL('break/break.html');
+  if (breakTabId !== null) {
+    chrome.tabs.get(breakTabId, (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        chrome.tabs.create({ url }, (t) => { breakTabId = t.id; });
+      } else {
+        chrome.tabs.update(breakTabId, { active: true });
+      }
+    });
+  } else {
+    chrome.tabs.create({ url }, (t) => { breakTabId = t.id; });
   }
-});
+}
 
-// ── Messages ───────────────────────────────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  (async () => {
-    switch (msg.type) {
+function closeBreakPage() {
+  if (breakTabId !== null) {
+    chrome.tabs.remove(breakTabId, () => { void chrome.runtime.lastError; });
+    breakTabId = null;
+  }
+}
 
-      case 'GET_STATE':
-        sendResponse({ ...state });
-        break;
+// ── Message handler ───────────────────────────────────────────
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  switch (msg.type) {
 
-      case 'START':
-        if (state.status !== 'running') {
-          if (state.remaining <= 0) state.remaining = getDuration(state.mode);
-          state.status = 'running';
-          startAlarm();
-          await saveState();
-          updateBadge();
+    case 'GET_STATE':
+      sendResponse({ ...state });
+      return false;
+
+    case 'START':
+      if (state.status !== 'running') {
+        if (state.remaining <= 0) {
+          state.remaining = state.settings.focusDuration * 60;
         }
-        sendResponse({ ...state });
-        break;
-
-      case 'PAUSE':
-        if (state.status === 'running') {
-          state.status = 'paused';
-          stopAlarm();
-          await saveState();
-          updateBadge();
-        }
-        sendResponse({ ...state });
-        break;
-
-      case 'RESET':
-        stopAlarm();
-        state.status    = 'stopped';
-        state.remaining = getDuration(state.mode);
-        await saveState();
+        state.status = 'running';
+        chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
         updateBadge();
-        sendResponse({ ...state });
-        break;
-
-      case 'SET_MODE': {
-        const m = msg.mode;
-        if (['focus', 'shortBreak', 'longBreak'].includes(m)) {
-          stopAlarm();
-          state.mode      = m;
-          state.status    = 'stopped';
-          state.remaining = getDuration(m);
-          await saveState();
-          updateBadge();
-        }
-        sendResponse({ ...state });
-        break;
+        saveState();
       }
+      sendResponse({ ...state });
+      return false;
 
-      case 'SET_AUTOLOOP':
-        state.autoLoop = !!msg.value;
-        await chrome.storage.local.set({ autoLoop: state.autoLoop });
-        await saveState();
-        sendResponse({ ...state });
-        break;
-
-      case 'BREAK_SKIP':
-        closeBreakTab();
-        stopAlarm();
-        if (state.autoLoop) {
-          state.mode      = 'focus';
-          state.status    = 'running';
-          state.remaining = getDuration('focus');
-          startAlarm();
-        } else {
-          state.mode      = 'focus';
-          state.status    = 'stopped';
-          state.remaining = getDuration('focus');
-        }
-        await saveState();
+    case 'PAUSE':
+      if (state.status === 'running') {
+        state.status = 'paused';
+        chrome.alarms.clear('tick');
         updateBadge();
-        sendResponse({ ...state });
-        break;
-
-      case 'RELOAD_SETTINGS': {
-        const data = await chrome.storage.local.get(['settings', 'enabledCategories']);
-        if (data.settings) {
-          state.settings = { ...DEFAULTS, ...data.settings };
-        }
-        if (data.enabledCategories) {
-          state.settings.enabledCategories = data.enabledCategories;
-        }
-        if (state.status !== 'running') {
-          state.remaining = getDuration(state.mode);
-        }
-        await saveState();
-        updateBadge();
-        sendResponse({ ...state });
-        break;
+        saveState();
       }
+      sendResponse({ ...state });
+      return false;
 
-      default:
-        sendResponse(null);
+    case 'RESET':
+      chrome.alarms.clear('tick');
+      state.status = 'stopped';
+      state.remaining = state.settings.focusDuration * 60;
+      state.mode = 'focus';
+      updateBadge();
+      saveState();
+      sendResponse({ ...state });
+      return false;
+
+    case 'SET_MODE': {
+      const modeMap = {
+        focus:      () => state.settings.focusDuration * 60,
+        shortBreak: () => state.settings.shortBreakDuration * 60,
+        longBreak:  () => state.settings.longBreakDuration * 60
+      };
+      if (modeMap[msg.mode]) {
+        chrome.alarms.clear('tick');
+        state.status = 'stopped';
+        state.mode = msg.mode;
+        state.remaining = modeMap[msg.mode]();
+        updateBadge();
+        saveState();
+      }
+      sendResponse({ ...state });
+      return false;
     }
-  })();
-  return true;
-});
 
-// ── Startup ────────────────────────────────────────────────────────────────
-chrome.runtime.onInstalled.addListener(async () => {
-  const data = await chrome.storage.local.get(['settings']);
-  if (!data.settings) {
-    await chrome.storage.local.set({ settings: { ...DEFAULTS } });
+    case 'SET_AUTOLOOP':
+      state.autoLoop = !!msg.value;
+      chrome.storage.sync.set({ autoLoop: state.autoLoop });
+      saveState();
+      sendResponse({ ...state });
+      return false;
+
+    case 'RELOAD_SETTINGS':
+      chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
+        state.settings = { ...DEFAULT_SETTINGS, ...settings };
+        if (state.status === 'stopped') {
+          if (state.mode === 'focus')       state.remaining = state.settings.focusDuration * 60;
+          else if (state.mode === 'shortBreak') state.remaining = state.settings.shortBreakDuration * 60;
+          else if (state.mode === 'longBreak')  state.remaining = state.settings.longBreakDuration * 60;
+        }
+        updateBadge();
+        saveState();
+        sendResponse({ ...state });
+      });
+      return true; // async
+
+    case 'BREAK_PAGE_DONE':
+      breakTabId = null;
+      if (state.autoLoop && state.mode === 'focus') {
+        state.status = 'running';
+        if (state.remaining <= 0) state.remaining = state.settings.focusDuration * 60;
+        chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
+        updateBadge();
+        saveState();
+      }
+      sendResponse({ ok: true });
+      return false;
+
+    case 'BREAK_PAGE_SKIP':
+      breakTabId = null;
+      chrome.alarms.clear('tick');
+      state.mode = 'focus';
+      state.remaining = state.settings.focusDuration * 60;
+      state.status = state.autoLoop ? 'running' : 'stopped';
+      if (state.autoLoop) {
+        chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
+      }
+      updateBadge();
+      saveState();
+      sendResponse({ ok: true });
+      return false;
+
+    case 'PLAY_SOUND':
+      // handled in popup/break pages directly
+      return false;
+
+    default:
+      // Unknown message — do NOT call sendResponse to avoid the error
+      return false;
   }
-  await loadState();
-  updateBadge();
 });
 
-chrome.runtime.onStartup.addListener(async () => {
-  await loadState();
-  updateBadge();
-  if (state.status === 'running') startAlarm();
+// ── Alarm handler ─────────────────────────────────────────────
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'tick') tick();
 });
 
-loadState().then(() => {
+// ── Tab closed ────────────────────────────────────────────────
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === breakTabId) {
+    breakTabId = null;
+  }
+});
+
+// ── Startup ───────────────────────────────────────────────────
+chrome.runtime.onInstalled.addListener(() => {
+  restoreState(() => { updateBadge(); });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  restoreState(() => {
+    updateBadge();
+    if (state.status === 'running') {
+      chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
+    }
+  });
+});
+
+// Init on service worker wake
+restoreState(() => {
   updateBadge();
-  if (state.status === 'running') startAlarm();
+  if (state.status === 'running') {
+    chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
+  }
 });
