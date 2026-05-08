@@ -1,14 +1,212 @@
 'use strict';
 
-let breakInterval = null;
-let remaining = 0;
-let totalDuration = 0;
-let breakMode = 'shortBreak';
-let lang = 'de';
-let skipSent = false;
+const CIRCUMFERENCE = 2 * Math.PI * 54; // 339.29
 
-function formatTime(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;\n}\n\nfunction updateTimerDisplay() {\n  const el = document.getElementById('breakTimer');\n  if (el) el.textContent = formatTime(remaining);\n\n  const bar = document.getElementById('breakProgressBar');\n  if (bar && totalDuration > 0) {\n    const pct = ((totalDuration - remaining) / totalDuration) * 100;\n    bar.style.width = `${pct}%`;\n  }\n}\n\nfunction playChime() {\n  try {\n    const ctx = new (window.AudioContext || window.webkitAudioContext)();\n    const osc = ctx.createOscillator();\n    const gain = ctx.createGain();\n    osc.connect(gain);\n    gain.connect(ctx.destination);\n    osc.type = 'sine';\n    osc.frequency.setValueAtTime(660, ctx.currentTime);\n    osc.frequency.exponentialRampToValueAtTime(330, ctx.currentTime + 0.5);\n    gain.gain.setValueAtTime(0.3, ctx.currentTime);\n    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);\n    osc.start(ctx.currentTime);\n    osc.stop(ctx.currentTime + 0.8);\n  } catch (e) {}\n}\n\nfunction stopBreakTimer() {\n  if (breakInterval) {\n    clearInterval(breakInterval);\n    breakInterval = null;\n  }\n}\n\nfunction startBreakTimer() {\n  stopBreakTimer();
-  breakInterval = setInterval(() => {\n    // Poll background state to sync pause\n    chrome.runtime.sendMessage({ type: 'GET_STATE' }, (state) => {\n      if (chrome.runtime.lastError) return;\n      if (!state) return;\n\n      // If background is paused, pause local timer\n      if (state.status === 'paused') {\n        return;\n      }\n\n      // If background is stopped and in focus mode, break was skipped/ended from elsewhere\n      if (state.status === 'stopped' && state.mode === 'focus') {\n        stopBreakTimer();\n        window.close();\n        return;\n      }\n\n      // Sync remaining time from background if it's significantly different\n      if (Math.abs(remaining - state.remaining) > 1) {\n        remaining = state.remaining;\n      }\n\n      remaining = Math.max(0, remaining - 1);\n      updateTimerDisplay();\n      if (remaining <= 0) {\n        stopBreakTimer();\n        onBreakEnd();\n      }\n    });\n  }, 1000);\n}\n\nfunction onBreakEnd() {\n  if (skipSent) return;\n  skipSent = true;\n  playChime();\n  chrome.runtime.sendMessage({ type: 'BREAK_PAGE_DONE' }, () => {\n    if (chrome.runtime.lastError) {}\n    setTimeout(() => window.close(), 500);\n  });\n}\n\nfunction getExercisesForCategories(categories) {\n  const exercises = [];\n  const categoryKeys = Object.keys(EXERCISES);\n\n  const enabledKeys = categoryKeys.filter(k => categories[k]);\n  if (enabledKeys.length === 0) return [];\n\n  // For each enabled category, pick one random exercise\n  enabledKeys.forEach(key => {\n    const cat = EXERCISES[key];\n    const pool = cat.exercises;\n    if (pool.length === 0) return;\n    const randomIndex = Math.floor(Math.random() * pool.length);\n    const ex = pool[randomIndex];\n    exercises.push({\n      icon: key === 'eyes' ? '👁️' : key === 'movement' ? '🚶' : '🧠',\n      title: ex.title[lang] || ex.title['de'],\n      desc: ex.desc[lang] || ex.desc['de']\n    });\n  });\n\n  return exercises;\n}\n\nfunction renderExercises(categories) {\n  const container = document.getElementById('exerciseCards');\n  if (!container) return;\n  container.innerHTML = '';\n\n  const exercises = getExercisesForCategories(categories);\n  if (exercises.length === 0) {\n    container.innerHTML = `<p style="color:#94a3b8;text-align:center;">\n      ${lang === 'en' ? 'No categories selected.' : 'Keine Kategorien ausgewählt.'}\n    </p>`;\n    return;\n  }\n\n  exercises.forEach(ex => {\n    const card = document.createElement('div');\n    card.className = 'exercise-card';\n    card.innerHTML = `\n      <div class="exercise-icon">${ex.icon}</div>\n      <div class="exercise-content">\n        <div class="exercise-title">${ex.title}</div>\n        <div class="exercise-desc">${ex.desc}</div>\n      </div>\n    `;\n    container.appendChild(card);\n  });\n}\n\nfunction renderUI(state) {\n  if (!state) return;\n\n  lang = (state.settings && state.settings.language) || 'de';\n  breakMode = state.mode || 'shortBreak';\n  remaining = state.remaining || 0;\n  totalDuration = state.total || remaining; // Use total from background state\n\n  // Fallback: if remaining is 0 or invalid, use settings\n  if (remaining <= 0 && state.settings) {\n    if (breakMode === 'shortBreak') {\n      remaining = (state.settings.shortBreakDuration || 5) * 60;\n    } else if (breakMode === 'longBreak') {\n      remaining = (state.settings.longBreakDuration || 15) * 60;\n    }\n    totalDuration = remaining;\n  }\n\n  // Headline\n  const headline = document.getElementById('breakHeadline');\n  if (headline) {\n    const sessionCount = state.sessionCount || 0;\n    if (breakMode === 'longBreak') {\n      headline.textContent = lang === 'en'\n        ? `🎉 Great work! ${sessionCount} sessions done — Long Break!`\n        : `🎉 Super gemacht! ${sessionCount} Sessions geschafft — Lange Pause!`;\n    } else {\n      headline.textContent = lang === 'en'\n        ? '😌 Well done! Time for a short break.'\n        : '😌 Gut gemacht! Zeit für eine kurze Pause.';\n    }\n  }\n\n  // Subtitle\n  const subtitle = document.getElementById('breakSubtitle');\n  if (subtitle) {\n    subtitle.textContent = lang === 'en'\n      ? 'Take care of your body.'\n      : 'Gönn deinem Körper etwas Gutes.';\n  }\n\n  // Skip button\n  const skipBtn = document.getElementById('skipBtn');\n  if (skipBtn) {\n    skipBtn.textContent = lang === 'en' ? 'Skip break' : 'Pause überspringen';\n  }\n\n  // Background color based on mode\n  document.body.className = '';\n  if (breakMode === 'longBreak') {\n    document.body.classList.add('long-break');\n  } else {\n    document.body.classList.add('short-break');\n  }\n\n  updateTimerDisplay();\n\n  const categories = (state.settings && state.settings.categories) || { eyes: true, movement: true, mental: true };\n  renderExercises(categories);\n\n  // Start timer if not already running and not paused by background\n  if (state.status !== 'paused' && breakInterval === null) {\n    startBreakTimer();\n  }\n}\n\ndocument.addEventListener('DOMContentLoaded', () => {\n  chrome.runtime.sendMessage({ type: 'GET_STATE' }, (state) => {\n    if (chrome.runtime.lastError || !state) {\n      // Fallback: use defaults\n      renderUI({\n        mode: 'shortBreak',\n        remaining: 5 * 60,\n        total: 5 * 60,\n        status: 'running',\n        sessionCount: 0,\n        settings: {\n          shortBreakDuration: 5,\n          longBreakDuration: 15,\n          language: 'de',\n          soundEnabled: true,\n          categories: { eyes: true, movement: true, mental: true }\n        }\n      });\n      return;\n    }\n\n    // If break page opened but status is 'stopped' (auto-loop off), force it running locally\n    // This ensures the break timer starts even if autoLoop is off and user manually starts focus then break\n    if (state.status === 'stopped' || state.status === 'paused') {\n      state.status = 'running'; // Temporarily set to running for local display\n    }\n\n    renderUI(state);\n  });\n\n  // Skip button\n  const skipBtn = document.getElementById('skipBtn');\n  if (skipBtn) {\n    skipBtn.addEventListener('click', () => {\n      if (skipSent) return;\n      skipSent = true;\n      stopBreakTimer();\n      chrome.runtime.sendMessage({ type: 'BREAK_PAGE_SKIP' }, () => {\n        if (chrome.runtime.lastError) {}\n        window.close();\n      });\n    });\n  }\n});\n\nwindow.addEventListener('beforeunload', () => {\n  stopBreakTimer();\n});\n
+const LABELS = {
+  de: {
+    breakTitle: 'Zeit für eine Pause! 🌿',
+    longBreakTitle: 'Lange Pause – gut gemacht! 🎉',
+    breakSubtitle: 'Gönn deinem Körper etwas Gutes.',
+    timerLabel: 'Pause',
+    exercisesHeading: 'Empfohlene Übungen',
+    skipBtn: 'Pause überspringen',
+    noCategories: 'Keine Kategorien ausgewählt'
+  },
+  en: {
+    breakTitle: 'Time for a break! 🌿',
+    longBreakTitle: 'Long break – well done! 🎉',
+    breakSubtitle: 'Give your body some love.',
+    timerLabel: 'Break',
+    exercisesHeading: 'Recommended exercises',
+    skipBtn: 'Skip break',
+    noCategories: 'No categories selected'
+  }
+};
+
+let totalDuration = 0;
+let exercisesRendered = false;
+let pollInterval = null;
+let lastMode = null;
+
+// ── Sound ──────────────────────────────────────────────────────
+function playSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(660, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(330, ctx.currentTime + 0.5);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.7);
+  } catch (_) {}
+}
+
+// ── Exercises ─────────────────────────────────────────────────
+function pickExercises(enabledCategories, lang) {
+  if (!Array.isArray(enabledCategories) || enabledCategories.length === 0) return [];
+
+  const byCategory = {};
+  enabledCategories.forEach(cat => { byCategory[cat] = []; });
+
+  (typeof EXERCISES !== 'undefined' ? EXERCISES : []).forEach(ex => {
+    if (byCategory.hasOwnProperty(ex.category)) {
+      byCategory[ex.category].push(ex);
+    }
+  });
+
+  const picked = [];
+  enabledCategories.forEach(cat => {
+    const pool = byCategory[cat];
+    if (pool && pool.length > 0) {
+      picked.push(pool[Math.floor(Math.random() * pool.length)]);
+    }
+  });
+  return picked;
+}
+
+function renderExercises(enabledCategories, lang) {
+  const grid = document.getElementById('exercisesGrid');
+  const heading = document.getElementById('exercisesHeading');
+  const L = LABELS[lang] || LABELS['de'];
+
+  if (heading) heading.textContent = L.exercisesHeading;
+
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const exercises = pickExercises(enabledCategories, lang);
+
+  if (exercises.length === 0) {
+    grid.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;text-align:center;">${L.noCategories}</p>`;
+    return;
+  }
+
+  exercises.forEach(ex => {
+    const loc = ex[lang] || ex['de'];
+    const card = document.createElement('div');
+    card.className = 'exercise-card';
+    card.innerHTML = `
+      <span class="ex-emoji">${ex.emoji}</span>
+      <span class="ex-title">${loc.title}</span>
+      <span class="ex-text">${loc.text}</span>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+// ── Timer UI ──────────────────────────────────────────────────
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function updateTimerUI(remaining, total, mode, lang) {
+  const L = LABELS[lang] || LABELS['de'];
+
+  // Text
+  const timerTextEl = document.getElementById('timerText');
+  if (timerTextEl) timerTextEl.textContent = formatTime(remaining);
+
+  // Label
+  const timerLabelEl = document.getElementById('timerLabel');
+  if (timerLabelEl) timerLabelEl.textContent = L.timerLabel;
+
+  // Circle
+  const progress = document.getElementById('timerProgress');
+  if (progress) {
+    const ratio = total > 0 ? remaining / total : 1;
+    progress.style.strokeDashoffset = CIRCUMFERENCE * (1 - ratio);
+
+    // Color: blue for long break, green for short break
+    progress.style.stroke = mode === 'longBreak' ? '#3b82f6' : '#22c55e';
+  }
+}
+
+function applyLabels(mode, lang) {
+  const L = LABELS[lang] || LABELS['de'];
+
+  const titleEl = document.getElementById('breakTitle');
+  if (titleEl) titleEl.textContent = mode === 'longBreak' ? L.longBreakTitle : L.breakTitle;
+
+  const subEl = document.getElementById('breakSubtitle');
+  if (subEl) subEl.textContent = L.breakSubtitle;
+
+  const skipEl = document.getElementById('skipBtn');
+  if (skipEl) skipEl.textContent = L.skipBtn;
+}
+
+// ── Main polling ──────────────────────────────────────────────
+function poll() {
+  chrome.runtime.sendMessage({ type: 'GET_STATE' }, (state) => {
+    if (chrome.runtime.lastError || !state) return;
+
+    const lang = (state.settings && state.settings.language) || 'de';
+    const mode = state.mode || 'shortBreak';
+    const remaining = typeof state.remaining === 'number' ? state.remaining : 0;
+    const settings = state.settings || {};
+
+    // Determine total duration from settings
+    let total = totalDuration;
+    if (!total || lastMode !== mode) {
+      if (mode === 'longBreak') {
+        total = (settings.longBreakDuration || 15) * 60;
+      } else {
+        total = (settings.shortBreakDuration || 5) * 60;
+      }
+      totalDuration = total;
+    }
+
+    // Apply labels once or when mode changes
+    if (lastMode !== mode) {
+      applyLabels(mode, lang);
+      lastMode = mode;
+    }
+
+    // Render exercises only once per break session
+    if (!exercisesRendered) {
+      const enabledCategories = Array.isArray(settings.enabledCategories)
+        ? settings.enabledCategories
+        : ['eyes', 'mental', 'movement'];
+      renderExercises(enabledCategories, lang);
+      exercisesRendered = true;
+    }
+
+    updateTimerUI(remaining, total, mode, lang);
+
+    // If the background finished or mode changed to focus → close tab
+    if (state.status === 'stopped' && remaining === 0) {
+      closePage();
+    }
+    if (mode === 'focus') {
+      closePage();
+    }
+  });
+}
+
+function closePage() {
+  if (pollInterval) clearInterval(pollInterval);
+  chrome.runtime.sendMessage({ type: 'BREAK_PAGE_DONE' }, () => {
+    window.close();
+  });
+}
+
+// ── Skip ──────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  playSound();
+
+  pollInterval = setInterval(poll, 1000);
+  poll(); // immediate first call
+
+  document.getElementById('skipBtn').addEventListener('click', () => {
+    if (pollInterval) clearInterval(pollInterval);
+    chrome.runtime.sendMessage({ type: 'BREAK_PAGE_SKIP' }, () => {
+      window.close();
+    });
+  });
+});

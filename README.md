@@ -2,6 +2,8 @@
 
 **ErgoFocus** ist eine Browser-Extension für Google Chrome, die den Pomodoro-Timer mit ergonomischen Pausen-Übungen verbindet. Sie hilft Bildschirmarbeitern dabei, produktiv zu bleiben und gleichzeitig auf ihre Gesundheit zu achten – komplett offline, ohne Tracking.
 
+<img width="293" height="407" alt="Image" src="https://github.com/user-attachments/assets/1424efd4-506d-481e-b0de-fa5138e5bf03" />
+
 ---
 
 ## Was macht ErgoFocus?
@@ -42,18 +44,6 @@ Klicke auf das Puzzle-Symbol in der Chrome-Toolbar, suche **ErgoFocus** und klic
 
 ---
 
-## Erweiterung für den Chrome Web Store vorbereiten
-
-Wenn du die Extension veröffentlichen möchtest:
-
-1. Erstelle PNG-Icons in den Größen **16×16**, **48×48** und **128×128** und lege sie im Ordner `assets/` ab (`icon16.png`, `icon48.png`, `icon128.png`).
-2. Komprimiere den gesamten Projekt-Ordner als `.zip`-Datei (ohne übergeordnete Ordner).
-3. Erstelle ein Entwickler-Konto auf [https://chrome.google.com/webstore/devconsole](https://chrome.google.com/webstore/devconsole) (einmalig 5 USD Gebühr).
-4. Lade das `.zip`-Paket hoch, füge Screenshots und eine Beschreibung hinzu.
-5. Reiche die Extension zur Prüfung ein (Bearbeitungszeit: 1–3 Werktage).
-
----
-
 ## Übungen erweitern
 
 Die Übungsdatenbank liegt in `data/exercises.js`. Um eine neue Übung hinzuzufügen, kopiere einfach ein vorhandenes Objekt und passe die Felder an:
@@ -63,7 +53,7 @@ Die Übungsdatenbank liegt in `data/exercises.js`. Um eine neue Übung hinzuzuf�
   category:    'movement',        // eyes | ergonomics | mental | movement
   category_label: 'Bewegung',    // Anzeigename Deutsch
   category_en: 'Movement',       // Anzeigename Englisch
-  emoji: '🚴',
+  emoji: '🚶',
   title:    'Neue Übung',
   title_en: 'New Exercise',
   desc:    'Beschreibung auf Deutsch.',

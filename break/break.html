@@ -1,32 +1,39 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>ErgoFocus – Pause</title>
-  <link rel="stylesheet" href="break.css" />
+  <link rel="stylesheet" href="break.css">
 </head>
-<body class="short-break">
+<body>
   <div class="break-container">
     <div class="break-header">
-      <h1 id="breakHeadline">Gut gemacht! Zeit für eine Pause.</h1>
-      <p id="breakSubtitle">Gönn deinem Körper etwas Gutes.</p>
+      <div class="break-icon">🌿</div>
+      <h1 class="break-title" id="breakTitle">Zeit für eine Pause!</h1>
+      <p class="break-subtitle" id="breakSubtitle">Gönn deinem Körper etwas Gutes.</p>
     </div>
 
-    <div class="timer-section">
-      <div class="break-timer-display" id="breakTimer">05:00</div>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" id="breakProgressBar"></div>
+    <div class="timer-display">
+      <svg viewBox="0 0 120 120" class="timer-svg">
+        <circle cx="60" cy="60" r="54" class="timer-track"/>
+        <circle cx="60" cy="60" r="54" class="timer-progress" id="timerProgress"/>
+      </svg>
+      <div class="timer-center">
+        <span class="timer-text" id="timerText">05:00</span>
+        <span class="timer-label" id="timerLabel">Pause</span>
       </div>
     </div>
 
     <div class="exercises-section">
-      <div id="exerciseCards" class="exercise-cards"></div>
+      <p class="exercises-heading" id="exercisesHeading">Empfohlene Übungen</p>
+      <div class="exercises-grid" id="exercisesGrid">
+        <!-- populated by JS -->
+      </div>
     </div>
 
-    <div class="break-footer">
-      <button id="skipBtn" class="skip-btn">Pause überspringen</button>
+    <div class="break-actions">
+      <button class="btn-skip" id="skipBtn">Pause überspringen</button>
     </div>
   </div>
 
