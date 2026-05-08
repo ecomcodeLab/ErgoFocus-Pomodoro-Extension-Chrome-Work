@@ -2,143 +2,142 @@
 
 const TRANSLATIONS = {
   de: {
-    headerSubtitle: 'Einstellungen',
-    langTitle: '🌐 Sprache',
-    langLabel: 'Sprache',
+    settingsTitle: 'Einstellungen',
+    languageTitle: 'Sprache',
     timerTitle: '⏱️ Timer',
-    focusLabel: 'Fokuszeit',
-    focusHint: '(gesund: 25–50 Min)',
-    shortBreakLabel: 'Kurze Pause',
-    shortBreakHint: '(gesund: 5–10 Min)',
-    longBreakLabel: 'Lange Pause',
-    longBreakHint: '(gesund: 15–30 Min)',
+    focusLabel: 'Fokuszeit (Minuten)',
+    focusHint: 'empfohlen: 20–25 Min für optimale Konzentration',
+    shortBreakLabel: 'Kurze Pause (Minuten)',
+    shortBreakHint: 'empfohlen: 5 Min nach jeder Fokuseinheit',
+    longBreakLabel: 'Lange Pause (Minuten)',
+    longBreakHint: 'empfohlen: 15–20 Min nach 4 Einheiten',
     sessionsLabel: 'Einheiten bis lange Pause',
-    sessionsHint: '(empfohlen: 4 Einheiten)',
-    notifTitle: '🔔 Benachrichtigungen',
+    sessionsHint: 'empfohlen: 4 Einheiten',
+    soundTitle: 'Benachrichtigungen',
     soundLabel: 'Ton bei Timer-Ablauf',
     notifLabel: 'Desktop-Benachrichtigungen',
-    catTitle: '🏷️ Übungskategorien',
-    catDesc: 'Wähle, welche Kategorien in der Pause angezeigt werden.',
-    catEyesLabel: 'Augen',
-    catMovementLabel: 'Bewegung',
-    catMentalLabel: 'Mental',
-    saveBtnText: 'Einstellungen speichern',
-    savedMsg: '✅ Gespeichert!'
+    categoriesTitle: '🏷️ Übungskategorien',
+    categoriesHint: 'Wähle, welche Kategorien in der Pause angezeigt werden.',
+    catEyes: 'Augen',
+    catMental: 'Mental',
+    catMovement: 'Bewegung',
+    saveBtn: 'Einstellungen speichern',
+    savedMsg: 'Einstellungen gespeichert'
   },
   en: {
-    headerSubtitle: 'Settings',
-    langTitle: '🌐 Language',
-    langLabel: 'Language',
+    settingsTitle: 'Settings',
+    languageTitle: 'Language',
     timerTitle: '⏱️ Timer',
-    focusLabel: 'Focus Time',
-    focusHint: '(healthy: 25–50 min)',
-    shortBreakLabel: 'Short Break',
-    shortBreakHint: '(healthy: 5–10 min)',
-    longBreakLabel: 'Long Break',
-    longBreakHint: '(healthy: 15–30 min)',
+    focusLabel: 'Focus duration (minutes)',
+    focusHint: 'recommended: 20–25 min for optimal focus',
+    shortBreakLabel: 'Short break (minutes)',
+    shortBreakHint: 'recommended: 5 min after each focus session',
+    longBreakLabel: 'Long break (minutes)',
+    longBreakHint: 'recommended: 15–20 min after 4 sessions',
     sessionsLabel: 'Sessions until long break',
-    sessionsHint: '(recommended: 4 sessions)',
-    notifTitle: '🔔 Notifications',
+    sessionsHint: 'recommended: 4 sessions',
+    soundTitle: 'Notifications',
     soundLabel: 'Sound on timer end',
     notifLabel: 'Desktop notifications',
-    catTitle: '🏷️ Exercise Categories',
-    catDesc: 'Choose which categories to show during breaks.',
-    catEyesLabel: 'Eyes',
-    catMovementLabel: 'Movement',
-    catMentalLabel: 'Mental',
-    saveBtnText: 'Save settings',
-    savedMsg: '✅ Saved!'
+    categoriesTitle: '🏷️ Exercise categories',
+    categoriesHint: 'Choose which categories are shown during breaks.',
+    catEyes: 'Eyes',
+    catMental: 'Mental',
+    catMovement: 'Movement',
+    saveBtn: 'Save settings',
+    savedMsg: 'Settings saved'
   }
+};
+
+const DEFAULT_SETTINGS = {
+  focusDuration: 20,
+  shortBreakDuration: 5,
+  longBreakDuration: 15,
+  sessionsUntilLongBreak: 4,
+  soundEnabled: true,
+  notificationsEnabled: true,
+  language: 'de',
+  enabledCategories: ['eyes', 'mental', 'movement']
 };
 
 let currentLang = 'de';
 
 function applyTranslations(lang) {
   const t = TRANSLATIONS[lang] || TRANSLATIONS['de'];
-  const ids = [
-    'headerSubtitle','langTitle','langLabel','timerTitle',
-    'focusLabel','focusHint','shortBreakLabel','shortBreakHint',
-    'longBreakLabel','longBreakHint','sessionsLabel','sessionsHint',
-    'notifTitle','soundLabel','notifLabel',
-    'catTitle','catDesc','catEyesLabel','catMovementLabel','catMentalLabel',
-    'saveBtnText'
-  ];
-  ids.forEach(id => {
-    const el = document.getElementById(id);
-    if (el && t[id] !== undefined) el.textContent = t[id];
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (t[key] !== undefined) el.textContent = t[key];
   });
+}
 
-  // Lang buttons
+function setLanguage(lang) {
+  currentLang = lang;
+  applyTranslations(lang);
+
   document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.lang === lang);
+    btn.classList.toggle('active', btn.getAttribute('data-lang') === lang);
   });
 }
 
 function loadSettings() {
-  chrome.storage.local.get(['pomodoroSettings'], (data) => {
-    const s = data.pomodoroSettings || {};
+  chrome.storage.sync.get(DEFAULT_SETTINGS, (s) => {
+    document.getElementById('focusDuration').value = s.focusDuration;
+    document.getElementById('shortBreakDuration').value = s.shortBreakDuration;
+    document.getElementById('longBreakDuration').value = s.longBreakDuration;
+    document.getElementById('sessionsUntilLongBreak').value = s.sessionsUntilLongBreak;
+    document.getElementById('soundEnabled').checked = s.soundEnabled;
+    document.getElementById('notificationsEnabled').checked = !!s.notificationsEnabled;
 
-    document.getElementById('focusDuration').value        = s.focusDuration        ?? 25;
-    document.getElementById('shortBreakDuration').value   = s.shortBreakDuration   ?? 5;
-    document.getElementById('longBreakDuration').value    = s.longBreakDuration    ?? 15;
-    document.getElementById('sessionsUntilLongBreak').value = s.sessionsUntilLongBreak ?? 4;
-    document.getElementById('soundEnabled').checked       = s.soundEnabled         ?? true;
-    document.getElementById('notificationsEnabled').checked = s.notificationsEnabled ?? true;
+    const lang = s.language || 'de';
+    setLanguage(lang);
 
-    const cats = s.categories || { eyes: true, movement: true, mental: true };
-    document.getElementById('catEyesToggle').checked     = cats.eyes    ?? true;
-    document.getElementById('catMovementToggle').checked = cats.movement ?? true;
-    document.getElementById('catMentalToggle').checked   = cats.mental  ?? true;
+    const enabled = Array.isArray(s.enabledCategories)
+      ? s.enabledCategories
+      : DEFAULT_SETTINGS.enabledCategories;
 
-    currentLang = s.language || 'de';
-    applyTranslations(currentLang);
+    document.querySelectorAll('.category-card').forEach(card => {
+      const cat = card.getAttribute('data-category');
+      card.classList.toggle('active', enabled.includes(cat));
+    });
   });
 }
 
 function saveSettings() {
-  const focusDuration        = parseInt(document.getElementById('focusDuration')?.value, 10)        || 25;
-  const shortBreakDuration   = parseInt(document.getElementById('shortBreakDuration')?.value, 10)   || 5;
-  const longBreakDuration    = parseInt(document.getElementById('longBreakDuration')?.value, 10)    || 15;
-  const sessionsUntilLongBreak = parseInt(document.getElementById('sessionsUntilLongBreak')?.value, 10) || 4;
-  const soundEnabled         = document.getElementById('soundEnabled')?.checked ?? true;
-  const notificationsEnabled = document.getElementById('notificationsEnabled')?.checked ?? true;
+  const focusDuration        = Math.min(60,  Math.max(1, parseInt(document.getElementById('focusDuration').value, 10) || 20));
+  const shortBreakDuration   = Math.min(30,  Math.max(1, parseInt(document.getElementById('shortBreakDuration').value, 10) || 5));
+  const longBreakDuration    = Math.min(60,  Math.max(1, parseInt(document.getElementById('longBreakDuration').value, 10) || 15));
+  const sessionsUntilLongBreak = Math.min(12, Math.max(1, parseInt(document.getElementById('sessionsUntilLongBreak').value, 10) || 4));
+  const soundEnabled         = document.getElementById('soundEnabled').checked;
+  const notificationsEnabled = document.getElementById('notificationsEnabled').checked;
 
-  const cats = {
-    eyes:     document.getElementById('catEyesToggle')?.checked     ?? true,
-    movement: document.getElementById('catMovementToggle')?.checked ?? true,
-    mental:   document.getElementById('catMentalToggle')?.checked   ?? true
-  };
+  const enabledCategories = [];
+  document.querySelectorAll('.category-card.active').forEach(card => {
+    enabledCategories.push(card.getAttribute('data-category'));
+  });
 
   const settings = {
-    focusDuration:        Math.max(1, Math.min(90, focusDuration)),
-    shortBreakDuration:   Math.max(1, Math.min(30, shortBreakDuration)),
-    longBreakDuration:    Math.max(1, Math.min(60, longBreakDuration)),
-    sessionsUntilLongBreak: Math.max(1, Math.min(10, sessionsUntilLongBreak)),
+    focusDuration,
+    shortBreakDuration,
+    longBreakDuration,
+    sessionsUntilLongBreak,
     soundEnabled,
     notificationsEnabled,
-    language:   currentLang,
-    categories: cats
+    language: currentLang,
+    enabledCategories
   };
 
-  chrome.runtime.sendMessage({ type: 'UPDATE_SETTINGS', settings }, () => {
-    if (chrome.runtime.lastError) {
-      console.error('Error sending UPDATE_SETTINGS message:', chrome.runtime.lastError.message);
-      const status = document.getElementById('saveStatus');
-      if (status) {
-        status.textContent = '❌ Fehler beim Speichern!';
-        status.style.color = 'red';
-        setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 3000);
-      }
-      return;
-    }
-    const status = document.getElementById('saveStatus');
-    const t = TRANSLATIONS[currentLang] || TRANSLATIONS['de'];
-    if (status) {
-      status.textContent = t.savedMsg;
-      status.style.color = 'var(--green)';
-      setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 2500);
-    }
+  chrome.storage.sync.set(settings, () => {
+    chrome.runtime.sendMessage({ type: 'RELOAD_SETTINGS' });
+    showSaved();
   });
+}
+
+function showSaved() {
+  const t = TRANSLATIONS[currentLang] || TRANSLATIONS['de'];
+  const el = document.getElementById('saveStatus');
+  el.textContent = t.savedMsg;
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 2200);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -147,28 +146,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Language buttons
   document.querySelectorAll('.lang-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      currentLang = btn.dataset.lang;
-      applyTranslations(currentLang);
-      // No need to save settings here, only when save button is clicked
+      setLanguage(btn.getAttribute('data-lang'));
     });
   });
 
-  // Category card click toggles checkbox
+  // Category cards toggle
   document.querySelectorAll('.category-card').forEach(card => {
-    card.addEventListener('click', (event) => {
-      // Prevent toggling if the click originated from the toggle-switch itself
-      if (event.target.closest('.toggle-switch')) {
-        return;
-      }
-      const checkbox = card.querySelector('input[type="checkbox"]');
-      if (checkbox) {
-        checkbox.checked = !checkbox.checked;
-        // No need to save settings here, only when save button is clicked
-      }
+    card.addEventListener('click', () => {
+      card.classList.toggle('active');
     });
   });
 
   // Save button
-  const saveBtn = document.getElementById('saveBtn');
-  if (saveBtn) saveBtn.addEventListener('click', saveSettings);
+  document.getElementById('saveBtn').addEventListener('click', saveSettings);
 });

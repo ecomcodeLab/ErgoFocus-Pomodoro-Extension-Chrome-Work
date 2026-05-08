@@ -1,41 +1,33 @@
 'use strict';
 
-const CIRCUMFERENCE = 2 * Math.PI * 54; // 339.292
-
 const LABELS = {
   de: {
     focus:        'Fokus',
     shortBreak:   'Kurze Pause',
     longBreak:    'Lange Pause',
     sessionLabel: 'bis lange Pause',
-    autoLoop:     'Auto-Loop'
+    autoLoop:     'Auto-Loop',
   },
   en: {
     focus:        'Focus',
     shortBreak:   'Short Break',
     longBreak:    'Long Break',
     sessionLabel: 'until long break',
-    autoLoop:     'Auto-Loop'
-  }
+    autoLoop:     'Auto-Loop',
+  },
 };
 
-let pollTimer = null;
+let pollTimer   = null;
+let lastSoundTs = 0;
 
-// ─── Utils ────────────────────────────────────────────────────────────────────
-function formatTime(seconds) {
-  const s = Math.max(0, Math.floor(Number(seconds) || 0));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmt(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
 }
 
-function getModeColor(mode) {
-  if (mode === 'shortBreak') return '#22c55e';
-  if (mode === 'longBreak')  return '#3b82f6';
-  return '#f97316';
-}
-
-function playChime() {
+function playSound() {
   try {
     const ctx  = new (window.AudioContext || window.webkitAudioContext)();
     const osc  = ctx.createOscillator();
@@ -45,159 +37,134 @@ function playChime() {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(880, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.4);
-    gain.gain.setValueAtTime(0.35, ctx.currentTime);
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
     osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.7);
-  } catch (_) {}
+    osc.stop(ctx.currentTime + 0.6);
+  } catch (e) {}
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
-let _lastRemaining = -1;
-let _lastStatus    = '';
+function updateCircle(remaining, total) {
+  const circle = document.getElementById('progressCircle');
+  if (!circle) return;
+  const circ     = 2 * Math.PI * 54;
+  const progress = total > 0 ? remaining / total : 1;
+  circle.style.strokeDashoffset = circ * (1 - progress);
+}
 
-function renderState(state) {
-  if (!state) return;
+function getModeColor(mode) {
+  if (mode === 'focus')      return '#f97316';
+  if (mode === 'shortBreak') return '#22c55e';
+  if (mode === 'longBreak')  return '#3b82f6';
+  return '#f97316';
+}
 
-  const lang     = (state.settings && state.settings.language) || 'de';
-  const labels   = LABELS[lang] || LABELS.de;
-  const mode     = state.mode     || 'focus';
-  const status   = state.status   || 'stopped';
-  const remaining = typeof state.remaining === 'number' ? state.remaining : 0;
-  const total     = typeof state.total     === 'number' ? state.total     : remaining;
+// ── Render ─────────────────────────────────────────────────────────────────
+function renderState(s) {
+  if (!s) return;
 
-  // Sound on transition to done
-  if (_lastRemaining > 0 && remaining === 0 && status !== 'stopped') {
-    if (state.settings && state.settings.soundEnabled !== false) playChime();
+  const lang      = (s.settings && s.settings.language) || 'de';
+  const labels    = LABELS[lang] || LABELS['de'];
+  const mode      = s.mode      || 'focus';
+  const status    = s.status    || 'stopped';
+  const remaining = typeof s.remaining === 'number' ? s.remaining : 0;
+
+  let total = 20 * 60;
+  if (s.settings) {
+    if (mode === 'focus')      total = (s.settings.focusDuration      || 20) * 60;
+    if (mode === 'shortBreak') total = (s.settings.shortBreakDuration  ||  5) * 60;
+    if (mode === 'longBreak')  total = (s.settings.longBreakDuration   || 15) * 60;
   }
-  _lastRemaining = remaining;
-  _lastStatus    = status;
 
-  // Timer
   const timerEl = document.getElementById('timer');
-  if (timerEl) timerEl.textContent = formatTime(remaining);
+  if (timerEl) timerEl.textContent = fmt(remaining);
 
-  // Mode label
   const modeLabelEl = document.getElementById('modeLabel');
   if (modeLabelEl) modeLabelEl.textContent = labels[mode] || mode;
 
-  // Progress ring
+  const color  = getModeColor(mode);
   const circle = document.getElementById('progressCircle');
-  if (circle) {
-    const color    = getModeColor(mode);
-    circle.style.stroke = color;
-    const progress = total > 0 ? remaining / total : 1;
-    circle.style.strokeDashoffset = String(CIRCUMFERENCE * (1 - progress));
-  }
+  if (circle) circle.style.stroke = color;
+  updateCircle(remaining, total);
 
-  // Play button
   const playBtn = document.getElementById('playBtn');
   if (playBtn) playBtn.textContent = status === 'running' ? '⏸' : '▶';
 
-  // Mode button highlights
+  const sessEl = document.getElementById('sessionCount');
+  if (sessEl) {
+    const needed  = (s.settings && s.settings.sessionsUntilLongBreak) || 4;
+    const count   = s.sessionCount || 0;
+    const inCycle = count % needed;
+    sessEl.textContent = '🍅 ' + inCycle + ' / ' + needed + ' ' + labels.sessionLabel;
+  }
+
   document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
 
-  // Session counter
-  const sessEl   = document.getElementById('sessionCount');
-  const settings = state.settings || {};
-  if (sessEl) {
-    const until   = parseInt(settings.sessionsUntilLongBreak, 10) || 4;
-    const count   = parseInt(state.sessionCount, 10) || 0;
-    const inCycle = count % until;
-    sessEl.textContent = `🍅 ${inCycle} / ${until} ${labels.sessionLabel}`;
+  const autoLoopToggle = document.getElementById('autoLoopToggle');
+  if (autoLoopToggle) autoLoopToggle.checked = !!s.autoLoop;
+
+  const autoLoopLabel = document.getElementById('autoLoopLabel');
+  if (autoLoopLabel) autoLoopLabel.textContent = labels.autoLoop;
+
+  // Sound check
+  if (s.settings && s.settings.soundEnabled) {
+    chrome.storage.local.get(['playSoundFlag'], (data) => {
+      if (data.playSoundFlag && data.playSoundFlag > lastSoundTs) {
+        lastSoundTs = data.playSoundFlag;
+        playSound();
+        // Clear flag so it doesn't replay
+        chrome.storage.local.remove('playSoundFlag');
+      }
+    });
   }
-
-  // Auto-loop toggle
-  const autoToggle = document.getElementById('autoLoopToggle');
-  if (autoToggle && autoToggle !== document.activeElement) {
-    autoToggle.checked = !!state.autoLoop;
-  }
-
-  // Auto-loop label
-  const autoLabel = document.getElementById('autoLoopLabel');
-  if (autoLabel) autoLabel.textContent = labels.autoLoop;
-
-  // Mode button labels
-  const btnFocus = document.getElementById('btn-focus');
-  const btnShort = document.getElementById('btn-shortBreak');
-  const btnLong  = document.getElementById('btn-longBreak');
-  if (btnFocus) btnFocus.textContent = labels.focus;
-  if (btnShort) btnShort.textContent = labels.shortBreak;
-  if (btnLong)  btnLong.textContent  = labels.longBreak;
 }
 
-// ─── Messaging ────────────────────────────────────────────────────────────────
-function sendMsg(type, extra, cb) {
-  const msg = { type, ...extra };
-  chrome.runtime.sendMessage(msg, (response) => {
-    if (chrome.runtime.lastError) {
-      console.warn('[Popup] sendMsg error:', chrome.runtime.lastError.message);
-      return;
-    }
-    if (cb) cb(response);
-    else renderState(response);
+// ── Poll ───────────────────────────────────────────────────────────────────
+function poll() {
+  chrome.runtime.sendMessage({ type: 'GET_STATE' }, (s) => {
+    if (chrome.runtime.lastError) return;
+    renderState(s);
   });
 }
 
-function pollState() {
-  sendMsg('GET_STATE', {}, renderState);
-}
-
-// ─── Init ─────────────────────────────────────────────────────────────────────
+// ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  pollState();
-  pollTimer = setInterval(pollState, 1000);
+  poll();
+  pollTimer = setInterval(poll, 1000);
 
-  // Play / Pause
   document.getElementById('playBtn').addEventListener('click', () => {
-    sendMsg('GET_STATE', {}, (state) => {
-      if (!state) return;
-      const action = state.status === 'running' ? 'PAUSE' : 'START';
-      sendMsg(action, {}, renderState);
+    chrome.runtime.sendMessage({ type: 'GET_STATE' }, (s) => {
+      if (!s) return;
+      const type = s.status === 'running' ? 'PAUSE' : 'START';
+      chrome.runtime.sendMessage({ type }, poll);
     });
   });
 
-  // Reset
   document.getElementById('resetBtn').addEventListener('click', () => {
-    sendMsg('RESET', {}, renderState);
+    chrome.runtime.sendMessage({ type: 'RESET' }, poll);
   });
 
-  // Mode buttons
   document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      sendMsg('SET_MODE', { mode: btn.dataset.mode }, renderState);
+      chrome.runtime.sendMessage({ type: 'SET_MODE', mode: btn.dataset.mode }, poll);
     });
   });
 
-  // Auto-loop toggle
-  const autoToggle = document.getElementById('autoLoopToggle');
-  if (autoToggle) {
-    autoToggle.addEventListener('change', () => {
-      sendMsg('SET_AUTOLOOP', { value: autoToggle.checked });
+  const autoLoopToggle = document.getElementById('autoLoopToggle');
+  if (autoLoopToggle) {
+    autoLoopToggle.addEventListener('change', () => {
+      chrome.runtime.sendMessage({ type: 'SET_AUTOLOOP', value: autoLoopToggle.checked });
     });
   }
 
-  // Settings button
   const settingsBtn = document.getElementById('settingsBtn');
   if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => {
-      chrome.runtime.openOptionsPage();
-    });
+    settingsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
   }
 
-  // Keyboard shortcuts
-  document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-      e.preventDefault();
-      document.getElementById('playBtn').click();
-    } else if (e.code === 'KeyR') {
-      document.getElementById('resetBtn').click();
-    }
+  window.addEventListener('unload', () => {
+    if (pollTimer) clearInterval(pollTimer);
   });
-});
-
-window.addEventListener('unload', () => {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 });
