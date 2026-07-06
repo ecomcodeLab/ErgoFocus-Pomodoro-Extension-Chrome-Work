@@ -1,6 +1,5 @@
 'use strict';
 
-// ── Constants ─────────────────────────────────────────────────
 const DEFAULT_SETTINGS = {
   focusDuration: 20,
   shortBreakDuration: 5,
@@ -12,309 +11,200 @@ const DEFAULT_SETTINGS = {
   enabledCategories: ['eyes', 'mental', 'movement']
 };
 
-const STATE_KEY = 'ergofocus_state';
-
-// ── In-memory state ───────────────────────────────────────────
-let state = {
-  status: 'stopped',
-  mode: 'focus',
-  remaining: 0,
-  sessionCount: 0,
-  autoLoop: false,
-  settings: { ...DEFAULT_SETTINGS }
-};
-
-// ── Persist / restore state ───────────────────────────────────
-function saveState() {
-  chrome.storage.local.set({ [STATE_KEY]: {
-    status: state.status,
-    mode: state.mode,
-    remaining: state.remaining,
-    sessionCount: state.sessionCount,
-    autoLoop: state.autoLoop
-  }});
+// Lädt den kompletten Zustand (Einstellungen + Timer-Status)
+async function getFullState() {
+  const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const local = await chrome.storage.local.get(['status', 'mode', 'endTime', 'remainingAtPause', 'sessionCount', 'autoLoop']);
+  
+  return {
+    status: local.status || 'stopped',
+    mode: local.mode || 'focus',
+    endTime: local.endTime || 0,
+    remainingAtPause: local.remainingAtPause || (settings.focusDuration * 60),
+    sessionCount: local.sessionCount || 0,
+    autoLoop: local.autoLoop || false,
+    settings: { ...DEFAULT_SETTINGS, ...settings }
+  };
 }
 
-function restoreState(cb) {
-  chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
-    state.settings = { ...DEFAULT_SETTINGS, ...settings };
-
-    chrome.storage.local.get([STATE_KEY], (local) => {
-      const saved = local[STATE_KEY];
-      if (saved) {
-        state.status       = saved.status       || 'stopped';
-        state.mode         = saved.mode         || 'focus';
-        state.remaining    = typeof saved.remaining === 'number' ? saved.remaining : (state.settings.focusDuration * 60);
-        state.sessionCount = saved.sessionCount || 0;
-        state.autoLoop     = saved.autoLoop     || false;
-      } else {
-        state.remaining = state.settings.focusDuration * 60;
-      }
-      if (typeof cb === 'function') cb();
-    });
-  });
-}
-
-// ── Badge ─────────────────────────────────────────────────────
-function updateBadge() {
-  if (state.status === 'stopped') {
+// Aktualisiert das Icon Badge
+async function updateBadge() {
+  const state = await getFullState();
+  if (state.status !== 'running' && state.status !== 'paused') {
     chrome.action.setBadgeText({ text: '' });
     return;
   }
 
-  const remaining = state.remaining;
-  let badgeText;
-
-  if (remaining <= 0) {
-    badgeText = '0';
-  } else if (remaining < 60) {
-    badgeText = String(remaining);
+  let remaining = 0;
+  if (state.status === 'running') {
+    remaining = Math.max(0, Math.round((state.endTime - Date.now()) / 1000));
   } else {
-    const mins = Math.ceil(remaining / 60);
-    badgeText = String(mins);
+    remaining = state.remainingAtPause;
   }
 
+  const badgeText = remaining < 60 ? remaining + 's' : Math.ceil(remaining / 60) + 'm';
   chrome.action.setBadgeText({ text: badgeText });
   chrome.action.setBadgeBackgroundColor({
     color: state.mode === 'focus' ? '#f97316' : '#22c55e'
   });
 }
 
-// ── Sound ─────────────────────────────────────────────────────
-function notifySound() {
-  // Flag setzen, damit das Popup oder die Break-Seite den Ton abspielt
-  chrome.storage.local.set({ playSoundFlag: Date.now() });
-}
-
-// ── Notification ──────────────────────────────────────────────
-function showNotification(title, message) {
-  if (!state.settings.notificationsEnabled) return;
-  chrome.notifications.create(`ergofocus_${Date.now()}`, {
-    type: 'basic',
-    iconUrl: 'assets/icon128.png',
-    title,
-    message
-  });
-}
-
-// ── Timer tick ────────────────────────────────────────────────
-function tick() {
-  if (state.status !== 'running') return;
+// Logik wenn ein Timer abläuft
+async function handleTimerFinished() {
+  const state = await getFullState();
+  await chrome.alarms.clear('timerEnd');
   
-  if (state.remaining <= 0) {
-    timerFinished();
-    return;
-  }
-  
-  state.remaining -= 1;
-  updateBadge();
-  saveState();
-}
-
-// ── Timer finished ────────────────────────────────────────────
-function timerFinished() {
-  chrome.alarms.clear('tick');
-  state.status = 'stopped';
-  notifySound();
+  // Sound-Flag für Popup/Breakpage setzen
+  await chrome.storage.local.set({ playSoundFlag: Date.now() });
 
   const lang = state.settings.language || 'de';
 
   if (state.mode === 'focus') {
-    // Fokus beendet -> Pause konfigurieren
-    state.sessionCount += 1;
+    // Wechsel zu Pause
+    const newSessionCount = (state.sessionCount || 0) + 1;
     const sessUntil = state.settings.sessionsUntilLongBreak || 4;
-    const isLongBreak = (state.sessionCount % sessUntil === 0);
-
+    const isLongBreak = (newSessionCount % sessUntil === 0);
     const nextMode = isLongBreak ? 'longBreak' : 'shortBreak';
-    const breakMins = isLongBreak
-      ? state.settings.longBreakDuration
-      : state.settings.shortBreakDuration;
+    const breakMins = isLongBreak ? state.settings.longBreakDuration : state.settings.shortBreakDuration;
+    const durationMs = breakMins * 60 * 1000;
 
-    state.mode = nextMode;
-    state.remaining = breakMins * 60;
-    
-    // Status auf RUNNING setzen, damit die Pause sofort losläuft
-    state.status = 'running';
-
-    const title   = lang === 'en' ? 'Focus done!' : 'Fokus beendet!';
-    const message = lang === 'en'
-      ? `${breakMins} min ${isLongBreak ? 'long ' : ''}break starting.`
-      : `${breakMins} Min. ${isLongBreak ? 'lange ' : ''}Pause beginnt.`;
-    showNotification(title, message);
-
-    saveState();
-    openBreakPage();
-    
-    // Timer für die Pause starten
-    chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
-    updateBadge();
-
-  } else {
-    // Pause beendet -> Zurück zu Fokus
-    const focusMins = state.settings.focusDuration;
-    state.mode = 'focus';
-    state.remaining = focusMins * 60;
-
-    const title   = lang === 'en' ? 'Break over!' : 'Pause beendet!';
-    const message = lang === 'en'
-      ? `${focusMins} min focus session starting.`
-      : `${focusMins} Min. Fokus beginnt.`;
-    showNotification(title, message);
-
-    // Wenn Auto-Loop aktiv ist, direkt weiterlaufen lassen
-    if (state.autoLoop) {
-      state.status = 'running';
-      chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
-    } else {
-      state.status = 'stopped';
-    }
-
-    saveState();
-    closeBreakPage();
-    updateBadge();
-  }
-}
-
-// ── Break page management ─────────────────────────────────────
-let breakTabId = null;
-
-function openBreakPage() {
-  const url = chrome.runtime.getURL('break/break.html');
-  chrome.tabs.create({ url }, (t) => { 
-    breakTabId = t.id; 
-  });
-}
-
-function closeBreakPage() {
-  if (breakTabId !== null) {
-    chrome.tabs.remove(breakTabId, () => { 
-      if (chrome.runtime.lastError) { /* ignore */ }
+    await chrome.storage.local.set({
+      status: 'running',
+      mode: nextMode,
+      endTime: Date.now() + durationMs,
+      sessionCount: newSessionCount
     });
-    breakTabId = null;
-  }
-}
 
-// ── Message handler ───────────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  switch (msg.type) {
-
-    case 'GET_STATE':
-      sendResponse({ ...state });
-      return false;
-
-    case 'START':
-      if (state.status !== 'running') {
-        if (state.remaining <= 0) {
-          const dur = (state.mode === 'focus') ? state.settings.focusDuration : 
-                      (state.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
-          state.remaining = dur * 60;
-        }
-        state.status = 'running';
-        chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
-        updateBadge();
-        saveState();
-      }
-      sendResponse({ ...state });
-      return false;
-
-    case 'PAUSE':
-      state.status = 'paused';
-      chrome.alarms.clear('tick');
-      updateBadge();
-      saveState();
-      sendResponse({ ...state });
-      return false;
-
-    case 'RESET':
-      chrome.alarms.clear('tick');
-      state.status = 'stopped';
-      state.mode = 'focus';
-      state.remaining = state.settings.focusDuration * 60;
-      updateBadge();
-      saveState();
-      sendResponse({ ...state });
-      return false;
-
-    case 'SET_MODE': {
-      chrome.alarms.clear('tick');
-      state.status = 'stopped';
-      state.mode = msg.mode;
-      const mins = (msg.mode === 'focus') ? state.settings.focusDuration : 
-                   (msg.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
-      state.remaining = mins * 60;
-      updateBadge();
-      saveState();
-      sendResponse({ ...state });
-      return false;
+    if (state.settings.notificationsEnabled) {
+      chrome.notifications.create('break_start', {
+        type: 'basic', iconUrl: 'assets/icon128.png',
+        title: lang === 'en' ? 'Focus done!' : 'Fokus beendet!',
+        message: lang === 'en' ? `${breakMins} min break starting.` : `${breakMins} Min. Pause beginnt.`
+      });
     }
 
-    case 'SET_AUTOLOOP':
-      state.autoLoop = !!msg.value;
-      chrome.storage.sync.set({ autoLoop: state.autoLoop });
-      saveState();
-      sendResponse({ ...state });
-      return false;
+    chrome.alarms.create('timerEnd', { when: Date.now() + durationMs });
+    chrome.tabs.create({ url: chrome.runtime.getURL('break/break.html') });
+  } else {
+    // Wechsel zu Fokus
+    const focusMins = state.settings.focusDuration;
+    const focusSecs = focusMins * 60;
+    const durationMs = focusMins * 60 * 1000;
 
-    case 'RELOAD_SETTINGS':
-      chrome.storage.sync.get(DEFAULT_SETTINGS, (settings) => {
-        state.settings = { ...DEFAULT_SETTINGS, ...settings };
-        // Nur Zeit anpassen, wenn Timer nicht läuft
-        if (state.status === 'stopped' || state.status === 'paused') {
-          const dur = (state.mode === 'focus') ? state.settings.focusDuration : 
-                      (state.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
-          state.remaining = dur * 60;
-        }
-        updateBadge();
-        saveState();
-        sendResponse({ ...state });
+    if (state.settings.notificationsEnabled) {
+      chrome.notifications.create('focus_start', {
+        type: 'basic', iconUrl: 'assets/icon128.png',
+        title: lang === 'en' ? 'Break over!' : 'Pause beendet!',
+        message: lang === 'en' ? `Time to focus for ${focusMins} minutes.` : `Zeit für ${focusMins} Minuten Fokus.`
       });
-      return true;
+    }
 
-    case 'BREAK_PAGE_DONE':
-      // Wird aufgerufen wenn Break-Timer abgelaufen ist oder Fenster geschlossen wurde
-      breakTabId = null;
-      sendResponse({ ok: true });
-      return false;
-
-    case 'BREAK_PAGE_SKIP':
-      // Manueller Skip auf der Break-Seite
-      breakTabId = null;
-      chrome.alarms.clear('tick');
-      state.mode = 'focus';
-      state.remaining = state.settings.focusDuration * 60;
-      state.status = state.autoLoop ? 'running' : 'stopped';
-      if (state.autoLoop) {
-        chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
-      }
-      updateBadge();
-      saveState();
-      sendResponse({ ok: true });
-      return false;
-
-    case 'PLAY_SOUND':
-      return false;
-
-    default:
-      return false;
+    if (state.autoLoop) {
+      await chrome.storage.local.set({ status: 'running', mode: 'focus', endTime: Date.now() + durationMs });
+      chrome.alarms.create('timerEnd', { when: Date.now() + durationMs });
+    } else {
+      await chrome.storage.local.set({ status: 'stopped', mode: 'focus', remainingAtPause: focusSecs });
+    }
   }
-});
-
-// ── Alarm handler ─────────────────────────────────────────────
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'tick') tick();
-});
-
-// ── Tab closed ────────────────────────────────────────────────
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId === breakTabId) {
-    breakTabId = null;
-  }
-});
-
-// ── Initialization ────────────────────────────────────────────
-restoreState(() => {
   updateBadge();
-  if (state.status === 'running') {
-    chrome.alarms.create('tick', { periodInMinutes: 1 / 60 });
-  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'timerEnd') handleTimerFinished();
 });
+
+// Haupt-Nachrichten-Handler
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Wichtig: Wir nutzen eine asynchrone IIFE, rufen aber sendResponse am Ende IMMER auf.
+  (async () => {
+    try {
+      const state = await getFullState();
+
+      if (msg.type === 'GET_STATE') {
+        let currentRemaining = 0;
+        if (state.status === 'running') {
+          currentRemaining = Math.max(0, Math.round((state.endTime - Date.now()) / 1000));
+          if (currentRemaining <= 0) {
+            await handleTimerFinished();
+            const updated = await getFullState();
+            sendResponse(updated);
+            return;
+          }
+        } else {
+          currentRemaining = state.remainingAtPause;
+        }
+        sendResponse({ ...state, remaining: currentRemaining });
+      }
+
+      else if (msg.type === 'START') {
+        let seconds = 0;
+        if (state.status === 'paused' && state.remainingAtPause > 0) {
+          seconds = state.remainingAtPause;
+        } else {
+          const mins = state.mode === 'focus' ? state.settings.focusDuration : 
+                       (state.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
+          seconds = mins * 60;
+        }
+
+        const endTime = Date.now() + (seconds * 1000);
+        await chrome.storage.local.set({ status: 'running', endTime: endTime });
+        chrome.alarms.create('timerEnd', { when: endTime });
+        updateBadge();
+        sendResponse({ ok: true });
+      }
+
+      else if (msg.type === 'PAUSE') {
+        const remaining = Math.max(0, Math.round((state.endTime - Date.now()) / 1000));
+        await chrome.storage.local.set({ status: 'paused', remainingAtPause: remaining });
+        chrome.alarms.clear('timerEnd');
+        updateBadge();
+        sendResponse({ ok: true });
+      }
+
+      else if (msg.type === 'RESET') {
+        chrome.alarms.clearAll();
+        const resetRemaining = state.settings.focusDuration * 60;
+        await chrome.storage.local.set({ status: 'stopped', mode: 'focus', remainingAtPause: resetRemaining });
+        updateBadge();
+        sendResponse({ ok: true });
+      }
+
+      else if (msg.type === 'SET_MODE') {
+        chrome.alarms.clearAll();
+        const mins = msg.mode === 'focus' ? state.settings.focusDuration : 
+                     (msg.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
+        await chrome.storage.local.set({ status: 'stopped', mode: msg.mode, remainingAtPause: mins * 60 });
+        updateBadge();
+        sendResponse({ ok: true });
+      }
+
+      else if (msg.type === 'SET_AUTOLOOP') {
+        await chrome.storage.local.set({ autoLoop: !!msg.value });
+        sendResponse({ ok: true });
+      }
+
+      else if (msg.type === 'BREAK_PAGE_SKIP') {
+        await handleTimerFinished(); // Simuliert Ablauf der Pause
+        sendResponse({ ok: true });
+      }
+
+      else if (msg.type === 'RELOAD_SETTINGS') {
+        const updated = await getFullState();
+        sendResponse(updated);
+      }
+      
+      else {
+        // Fallback für unbekannte Nachrichten
+        sendResponse({ error: 'Unknown message type' });
+      }
+    } catch (err) {
+      console.error('Error in background message handler:', err);
+      sendResponse({ error: err.message });
+    }
+  })();
+
+  return true; // Ermöglicht asynchrones sendResponse
+});
+
+// Initialisierung
+updateBadge();

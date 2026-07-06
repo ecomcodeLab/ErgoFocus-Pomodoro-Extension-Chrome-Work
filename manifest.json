@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ErgoFocus – Pomodoro & Health Timer",
-  "version": "1.4.1",
+  "version": "1.4.5",
   "description": "Pomodoro timer with ergonomic health break exercises. 100% offline, no tracking.",
   "permissions": [
     "storage",
@@ -31,11 +31,5 @@
   },
   "content_security_policy": {
     "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none';"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["break/break.html"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }
