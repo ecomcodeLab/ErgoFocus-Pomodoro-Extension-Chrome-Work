@@ -54,6 +54,13 @@ body {
   border-color: #f97316;
 }
 
+/* Deaktiviere Modus-Tasten, wenn Timer läuft */
+.mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* Timer ring */
 .timer-section {
   position: relative;

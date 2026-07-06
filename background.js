@@ -20,33 +20,52 @@ async function getFullState() {
     status: local.status || 'stopped',
     mode: local.mode || 'focus',
     endTime: local.endTime || 0,
-    remainingAtPause: local.remainingAtPause || (settings.focusDuration * 60),
+    remainingAtPause: typeof local.remainingAtPause === 'number' ? local.remainingAtPause : (settings.focusDuration * 60),
     sessionCount: local.sessionCount || 0,
     autoLoop: local.autoLoop || false,
     settings: { ...DEFAULT_SETTINGS, ...settings }
   };
 }
 
-// Aktualisiert das Icon Badge
+// Aktualisiert das Icon Badge ressourcenschonend (liest nur lokales Storage)
 async function updateBadge() {
-  const state = await getFullState();
-  if (state.status !== 'running' && state.status !== 'paused') {
+  const local = await chrome.storage.local.get(['status', 'mode', 'endTime', 'remainingAtPause']);
+  const status = local.status || 'stopped';
+  const mode = local.mode || 'focus';
+
+  if (status !== 'running' && status !== 'paused') {
     chrome.action.setBadgeText({ text: '' });
     return;
   }
 
   let remaining = 0;
-  if (state.status === 'running') {
-    remaining = Math.max(0, Math.round((state.endTime - Date.now()) / 1000));
+  if (status === 'running') {
+    remaining = Math.max(0, Math.round(((local.endTime || 0) - Date.now()) / 1000));
   } else {
-    remaining = state.remainingAtPause;
+    remaining = local.remainingAtPause || 0;
   }
 
   const badgeText = remaining < 60 ? remaining + 's' : Math.ceil(remaining / 60) + 'm';
   chrome.action.setBadgeText({ text: badgeText });
   chrome.action.setBadgeBackgroundColor({
-    color: state.mode === 'focus' ? '#f97316' : '#22c55e'
+    color: mode === 'focus' ? '#f97316' : '#22c55e'
   });
+}
+
+// Badge Intervall Management (nur aktiv, wenn Timer läuft)
+let badgeInterval = null;
+
+function manageBadgeInterval(status) {
+  if (status === 'running') {
+    if (!badgeInterval) {
+      badgeInterval = setInterval(updateBadge, 5000);
+    }
+  } else {
+    if (badgeInterval) {
+      clearInterval(badgeInterval);
+      badgeInterval = null;
+    }
+  }
 }
 
 // Logik wenn ein Timer abläuft
@@ -58,6 +77,7 @@ async function handleTimerFinished() {
   await chrome.storage.local.set({ playSoundFlag: Date.now() });
 
   const lang = state.settings.language || 'de';
+  let nextStatus = 'stopped';
 
   if (state.mode === 'focus') {
     // Wechsel zu Pause
@@ -74,6 +94,7 @@ async function handleTimerFinished() {
       endTime: Date.now() + durationMs,
       sessionCount: newSessionCount
     });
+    nextStatus = 'running';
 
     if (state.settings.notificationsEnabled) {
       chrome.notifications.create('break_start', {
@@ -102,11 +123,14 @@ async function handleTimerFinished() {
     if (state.autoLoop) {
       await chrome.storage.local.set({ status: 'running', mode: 'focus', endTime: Date.now() + durationMs });
       chrome.alarms.create('timerEnd', { when: Date.now() + durationMs });
+      nextStatus = 'running';
     } else {
       await chrome.storage.local.set({ status: 'stopped', mode: 'focus', remainingAtPause: focusSecs });
+      nextStatus = 'stopped';
     }
   }
   updateBadge();
+  manageBadgeInterval(nextStatus);
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -137,6 +161,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       else if (msg.type === 'START') {
+        if (state.status === 'running') {
+          sendResponse({ ok: false, reason: 'Already running' });
+          return;
+        }
+
         let seconds = 0;
         if (state.status === 'paused' && state.remainingAtPause > 0) {
           seconds = state.remainingAtPause;
@@ -150,31 +179,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await chrome.storage.local.set({ status: 'running', endTime: endTime });
         chrome.alarms.create('timerEnd', { when: endTime });
         updateBadge();
+        manageBadgeInterval('running');
         sendResponse({ ok: true });
       }
 
       else if (msg.type === 'PAUSE') {
+        if (state.status !== 'running') {
+          sendResponse({ ok: false, reason: 'Not running' });
+          return;
+        }
+
         const remaining = Math.max(0, Math.round((state.endTime - Date.now()) / 1000));
         await chrome.storage.local.set({ status: 'paused', remainingAtPause: remaining });
         chrome.alarms.clear('timerEnd');
         updateBadge();
+        manageBadgeInterval('paused');
         sendResponse({ ok: true });
       }
 
       else if (msg.type === 'RESET') {
         chrome.alarms.clearAll();
-        const resetRemaining = state.settings.focusDuration * 60;
-        await chrome.storage.local.set({ status: 'stopped', mode: 'focus', remainingAtPause: resetRemaining });
+        const mins = state.mode === 'focus' ? state.settings.focusDuration : 
+                     (state.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
+        await chrome.storage.local.set({ status: 'stopped', remainingAtPause: mins * 60 });
         updateBadge();
+        manageBadgeInterval('stopped');
         sendResponse({ ok: true });
       }
 
       else if (msg.type === 'SET_MODE') {
-        chrome.alarms.clearAll();
+        if (state.status === 'running') {
+          sendResponse({ ok: false });
+          return;
+        }
+
+        if (state.mode === msg.mode && state.status !== 'stopped') {
+          sendResponse({ ok: true });
+          return;
+        }
+
         const mins = msg.mode === 'focus' ? state.settings.focusDuration : 
                      (msg.mode === 'shortBreak' ? state.settings.shortBreakDuration : state.settings.longBreakDuration);
+        
+        chrome.alarms.clearAll();
         await chrome.storage.local.set({ status: 'stopped', mode: msg.mode, remainingAtPause: mins * 60 });
+        
         updateBadge();
+        manageBadgeInterval('stopped');
         sendResponse({ ok: true });
       }
 
@@ -184,7 +235,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       else if (msg.type === 'BREAK_PAGE_SKIP') {
-        await handleTimerFinished(); // Simuliert Ablauf der Pause
+        await handleTimerFinished();
         sendResponse({ ok: true });
       }
 
@@ -194,7 +245,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       
       else {
-        // Fallback für unbekannte Nachrichten
         sendResponse({ error: 'Unknown message type' });
       }
     } catch (err) {
@@ -203,8 +253,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
   })();
 
-  return true; // Ermöglicht asynchrones sendResponse
+  return true; 
 });
 
-// Initialisierung
-updateBadge();
+// Initialisierung (wird beim Aufwachen des Service Workers gefeuert)
+chrome.storage.local.get(['status']).then(data => {
+  const currentStatus = data.status || 'stopped';
+  updateBadge();
+  manageBadgeInterval(currentStatus);
+});

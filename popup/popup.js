@@ -74,9 +74,12 @@ function renderState(s) {
     sessEl.textContent = '🍅 ' + inCycle + ' / ' + needed + ' ' + labels.sessionLabel;
   }
 
+  // Disable Mode-Buttons when Timer is running
+  const isRunning = (status === 'running');
   document.querySelectorAll('.mode-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
     if (labels[btn.dataset.mode]) btn.textContent = labels[btn.dataset.mode];
+    btn.disabled = isRunning;
   });
 
   document.getElementById('autoLoopToggle').checked = !!s.autoLoop;
