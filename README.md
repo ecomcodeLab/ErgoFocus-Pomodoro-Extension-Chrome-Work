@@ -1,10 +1,10 @@
+<img width="293" height="407" alt="ErgoFocus Pomodoro Health Timer" src="https://github.com/user-attachments/assets/41787f84-9800-43d2-99b2-91daabc59ba5" />
+
 # ErgoFocus – Pomodoro & Health Timer
 
 **ErgoFocus** is a browser extension for Google Chrome that combines the Pomodoro timer with ergonomic break exercises. It helps screen workers stay productive while taking care of their health – completely offline, with no tracking.
 
 **Supports German (DE) and English (EN) languages.**
-
-<img width="293" height="407" alt="Image" src="https://github.com/user-attachments/assets/1424efd4-506d-481e-b0de-fa5138e5bf03" />
 
 ---
 
